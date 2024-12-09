@@ -1,17 +1,18 @@
 import requests
-from bs4 import BeautifulSoup , Comment
+from bs4 import BeautifulSoup, Comment
 import time
 import urllib3
+import json
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+def load_config(file_path="config.json"):
+    with open(file_path, "r") as file:
+        return json.load(file)
 
-score = 0
-pages = []  # Pages in the website
-headers = 0  # Headers in pages
-isIndex = False  # If the URL is index.html or not
-
-urls = ["https://fatihparm.github.io/ruh-ikizin/"]
+def load_urls(file_path="urls.txt"):
+    with open(file_path, "r") as file:
+        return file.readlines()
 
 def polite_get(url, delay=2):
     """
@@ -30,50 +31,66 @@ def polite_get(url, delay=2):
         print(f"Error accessing {url}: {e}")
         return None
 
+def get_pages(base_url):
+    """
+    Verilen bir base URL'deki tüm .html sayfalarını ve belirtilen kurallara uygun sayfaları döndürür.
+    """
+    pages = set()  # Set kullanımı, tekrar eden bağlantıları önler.
 
-def get_pages(urls):
-    global isIndex  # 'isIndex' değişkenini global olarak kullan]
+    # Base URL sonlandırmaları kontrol edilip normalize ediliyor.
+    if base_url.endswith("/"):
+        base_url = base_url.rstrip("/")
+    if base_url.endswith("index.html"):
+        base_url = base_url.rsplit("/", 1)[0]
+    if not base_url.endswith(".html"):
+        base_url += "/index.html"
 
-    for url in urls:
-        print("URL: ", url)
+    # Base URL'e erişim.
+    response = polite_get(base_url)
+    if response is None:
+        return list(pages)
 
-        # Index kontrolü
-        if url.endswith("index.html") or url.endswith("index.html/"):
-            isIndex = True
-        elif url.endswith(".com/") or url.endswith(".io/"):
-            isIndex = True
-            url = url + "index.html"
-        elif url.endswith(".com") or url.endswith(".io"):
-            isIndex = True
-            url = url + "/index.html"
+    soup = BeautifulSoup(response.content, "html.parser")
+    links = soup.find_all("a")
+
+    # Base sayfayı ekliyoruz.
+    pages.add(base_url)
+
+    # Tüm <a> etiketlerindeki href'leri kontrol ediyoruz.
+    for link in links:
+        href = link.get("href")
+        if not href:
+            continue  # Href boşsa atla.
+
+        # Href bir tam URL değilse, base URL ile birleştiriyoruz.
+        if "://" not in href:
+            if href.startswith("/"):
+                full_link = f"{base_url.rsplit('/', 3)[0]}{href}"  # Kök URL'yi baz alarak birleştir.
+            else:
+                full_link = f"{base_url.rsplit('/', 1)[0]}/{href}"
         else:
-            isIndex = False
+            full_link = href
 
-        # İlk URL'yi listeye ekle
-        if url not in pages:
-            pages.append(url)
-
-        # İlk URL için istek yap
-        response = polite_get(url)
-        if response is None:
+        # Sadece belirtilen github.io kök URL'leri kabul ediliyor.
+        if "github.io" not in full_link or not full_link.startswith(base_url.rsplit("/", 1)[0]):
             continue
 
-        soup = BeautifulSoup(response.content, "html.parser")
-        links = soup.find_all("a")
+        # Kabul edilen sayfa formatlarını kontrol et.
+        if (
+            full_link.endswith(".html") or
+            full_link.endswith("/") or
+            full_link == base_url.rsplit("/", 1)[0]  # Ana dizini ekler.
+        ):
+            pages.add(full_link)
 
-        # Bağlantıları ekle
-        for link in links:
-            href = link.get("href")
-            if href and href.endswith(".html") and "://" not in href:
-                page_link = f"{url.rsplit('/', 1)[0]}/{href}"
-                if page_link not in pages:  # Aynı bağlantıyı tekrar eklemeyin
-                    pages.append(page_link)
+    return list(pages)
+
+
+def has_js(content):
+    return bool(content.find("script"))
 
 def has_header(content):
-    if (content.find(["h1","h2","h3","h4","h5","h6"]) is not None):
-        return True
-    else:
-        return False
+    return content.find(["h1", "h2", "h3", "h4", "h5", "h6"]) is not None
 
 def has_table(content):
     tables = content.find_all("table")
@@ -94,119 +111,86 @@ def has_long_paragraph(content):
     return False
 
 def has_comment(content):
-    """
-    Kontrol eder: Sayfa içeriğinde doğrudan <!-- --> şeklinde yorum var mı?
-    """
-    # Yorum düğümlerini bul
     comments = content.find_all(string=lambda text: isinstance(text, Comment))
-    # Yorum varsa True döndür
     return bool(comments)
 
-
 def has_image(content):
-    """
-    Kontrol eder: Sayfa içeriğinde en az bir resim var mı?
-    """
-    if content.find("img"):
-        return True
-    return False
+    return bool(content.find("img"))
 
+def evaluate_pages_with_config(base_url, config):
+    pages = get_pages(base_url)
+    if not pages:
+        print(f"{base_url} için sayfa bulunamadı.")
+        return
 
-def evaluate_pages():
-    total_score = 0
-    total_index_score = 0
-    total_image_score = 0
-    total_header_score = 0
-    total_paragraph_score = 0
-    pages_with_comments = 0
-    comment_count = 0
-    total_comment_score = 0
-    table_score_added = False  # Tablo puanı eklenip eklenmediğini takip eder
-    image_pages_count = 0  # Resim bulunan sayfa sayısı
+    weights = config["weights"]
+    thresholds = config["thresholds"]
+
+    toplam_skor = 0
+    toplam_sayfa_sayisi = len(pages)
+    baslik_uyumlu_sayfa = 0
+    paragraf_uyumlu_sayfa = 0
+    resim_uyumlu_sayfa = 0
+    yorumlu_sayfa_sayisi = 0
+    tablo_puani_eklendi = False
 
     for page in pages:
         response = polite_get(page)
         if response is None:
             continue
+
         soup = BeautifulSoup(response.content, "html.parser")
+
+        # Başlık Kontrolü
+        if has_header(soup):
+            baslik_uyumlu_sayfa += 1
+
+        # Tablo Kontrolü
+        if has_table(soup) and not tablo_puani_eklendi:
+            tablo_puani_eklendi = True
+
+        # Paragraf Kontrolü
+        if has_long_paragraph(soup):
+            paragraf_uyumlu_sayfa += 1
 
         # Resim Kontrolü
         if has_image(soup):
-            image_pages_count += 1
-
-        # Header Kontrolü
-        header_score = 4 if has_header(soup) else 0
-
-        # Tablo Kontrolü
-        if has_table(soup) and not table_score_added:  # Legal tablo kontrolü
-            table_score_added = True
-
-        # Paragraf Kontrolü
-        paragraph_score = 4 if has_long_paragraph(soup) else 0
+            resim_uyumlu_sayfa += 1
 
         # Yorum Kontrolü
-        comment_count += 1 if has_comment(soup) else 0
+        if has_comment(soup):
+            yorumlu_sayfa_sayisi += 1
 
-        # Sayfa Bazlı Bilgileri Yazdır
-        print("Sayfa: ", page)
-        print(f"Header Puanı: {header_score}")
-        print(f"Paragraf Puanı: {paragraph_score}")
-        print(f"Yorum Satırı?: {has_comment(soup)}")
-        print(f"Tablo Var mı?: {has_table(soup)}")
-        print(f"Resim Var mı?: {has_image(soup)}")
-        print("--------------------------------------------------")
+    # Skor Hesaplamaları
+    toplam_indeks_puani = min(weights["index"] * toplam_sayfa_sayisi, weights["max_index_score"])
+    toplam_baslik_puani = weights["header"] * (baslik_uyumlu_sayfa / toplam_sayfa_sayisi) if toplam_sayfa_sayisi > 0 else 0
+    toplam_paragraf_puani = weights["paragraph"] * (paragraf_uyumlu_sayfa / toplam_sayfa_sayisi) if toplam_sayfa_sayisi > 0 else 0
+    toplam_resim_puani = weights["image"] * (resim_uyumlu_sayfa / toplam_sayfa_sayisi) if toplam_sayfa_sayisi > 0 else 0
+    toplam_yorum_puani = weights["comments"] if yorumlu_sayfa_sayisi == toplam_sayfa_sayisi else 0
+    tablo_puani = weights["table"] if tablo_puani_eklendi else 0
 
-        # Sayfa Bazlı Toplam
-        total_header_score += header_score
-        total_paragraph_score += paragraph_score
-    print("Tüm Sayfaların Değerlendirilmesi Tamamlandı.")
-
-    # Indeks Sayfa Kontrolü
-    total_index_score = 4 * len(pages)
-    if total_index_score >= 20:
-        total_index_score = 20
-    # Resim Puanını Toplam Skora Ekle
-    total_image_score = min(image_pages_count * 4, 20)  # Maksimum 20 puan
-    print(f"Resim Bulunan Sayfa Sayısı: {image_pages_count}")
-    print(f"Resim Puanı: {total_image_score}")
-
-    print(f"Yorum satırı olan sayfa sayısı: {comment_count}")
-
-    # Tablo Puanını Toplam Skora Ekle
-    table_score = 10 if table_score_added else 0
-    print(f"Tablo Puanı: {table_score}")
-
-    # Yorum Puanını Toplam Skora Ekle
-    if comment_count == len(pages):
-        total_comment_score = 10
-
-    if total_header_score >= 20:
-        total_header_score = 20
-    
-    if total_paragraph_score >= 20:
-        total_paragraph_score = 20
-
-    # Tüm Skorları Topla
-    total_score = (
-        total_image_score
-        + total_index_score
-        + total_header_score
-        + total_paragraph_score
-        + total_comment_score
-        + table_score
+    toplam_skor = (
+        toplam_indeks_puani
+        + toplam_baslik_puani
+        + toplam_paragraf_puani
+        + toplam_resim_puani
+        + toplam_yorum_puani
+        + tablo_puani
     )
 
-    # Toplam Puan Yazdır
+    # Sonuçları Yazdır
     print("******************************************")
-    print("İndeks Puanı: ", total_index_score)
-    print("Header Puanı: ", total_header_score)
-    print("Resim Puanı: ", total_image_score)
-    print("Paragraf Puanı: ", total_paragraph_score)
-    print("Yorum Puanı: ", total_comment_score)
-    print("Tablo Puanı: ", table_score)
-    print("Toplam Puan (100 üzerinden): ", min(total_score, 100))  # Maksimum 100
+    print(f"İndeks Puanı: {toplam_indeks_puani} (Her sayfa {weights['index']} puan kazandırır, maksimum {weights['max_index_score']} puan)")
+    print(f"Başlık Puanı: {toplam_baslik_puani:.2f} ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama: {weights['header']} * ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi}))")
+    print(f"Paragraf Puanı: {toplam_paragraf_puani:.2f} ({paragraf_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama {weights['paragraph']} *{paragraf_uyumlu_sayfa} / {toplam_sayfa_sayisi}))")
+    print(f"Resim Puanı: {toplam_resim_puani:.2f} ({resim_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama {weights['image']} * {resim_uyumlu_sayfa} / {toplam_sayfa_sayisi})")
+    print(f"Yorum Puanı: {toplam_yorum_puani} ({'Tüm sayfalarda yorum bulundu' if yorumlu_sayfa_sayisi == toplam_sayfa_sayisi else 'Her sayfada yorum satırı bulunamadı'}, varsa {weights['comments']} puan)")
+    print(f"Tablo Puanı: {tablo_puani} (Tablo bulundu mu: {'Evet' if tablo_puani_eklendi else 'Hayır'}, tablo puanı: {weights['table']})")
+    print(f"Toplam Skor (100 üzerinden): {min(toplam_skor, 100):.2f}")
 
-# Sayfaları Al ve Değerlendir
-get_pages(urls)
-evaluate_pages()
 
+# Main Evaluation
+config = load_config("config.json")
+urls = load_urls("urls.txt")
+for url in urls:
+    evaluate_pages_with_config(url, config)
