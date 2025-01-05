@@ -9,7 +9,7 @@ import csv
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-global thresholds, weights , config, urls
+global tresholds, weights , config, urls
 class Not:
     def __init__(self, url, index_score, header_score, paragraph_score, image_score, comment_score, table_score, total_score):
         self.url = url
@@ -29,7 +29,7 @@ def load_urls(file_path="urls.txt"):
     with open(file_path, "r") as file:
         return file.readlines()
 config = load_config("config.json")
-tresholds = config["thresholds"]
+tresholds = config["tresholds"]
 weights = config["weights"]
     
 def polite_get(url, delay=2):
@@ -108,6 +108,7 @@ def has_js(content):
             return True
     return False
 
+
 def has_header(content):
     """
     Sayfa içinde en az bir başlık etiketi (h1, h2, h3, h4, h5, h6) kullanılıp kullanılmadığını kontrol eder.
@@ -152,15 +153,23 @@ def has_image(content):
     """
     return bool(content.find("img"))
 
-def evaluate_pages_with_config(base_url, config):
+def log_to_file(log_file, message):
     """
-    Verilen bir base URL için belirtilen kurallara göre sayfaları değerlendirir ve skorlarını hesaplar.
+    Log dosyasına mesaj yazma işlevi.
+    """
+    with open(log_file, "a", encoding="utf-8") as file:
+        file.write(message + "\n")
+
+def evaluate_pages(base_url, config, log_file="log.txt"):
+    """
+    Sayfa analizlerini loglar ve nihai sonuçları bir dosyaya kaydeder.
     """
     pages = get_pages(base_url)
-    print(f"{base_url} için {len(pages)} sayfa bulundu.")
+    log_to_file(log_file, f"{base_url} için {len(pages)} sayfa bulundu.\n")
     if not pages:
-        print(f"{base_url} için sayfa bulunamadı.")
+        log_to_file(log_file, f"{base_url} için sayfa bulunamadı.\n")
         return
+    
     sonuclar = []
     toplam_sayfa_sayisi = len(pages)
     toplam_skor = 0
@@ -173,33 +182,50 @@ def evaluate_pages_with_config(base_url, config):
     for page in pages:
         response = polite_get(page)
         if response is None:
+            log_to_file(log_file, f"{page}: Sayfaya erişilemedi.\n")
             continue
 
         soup = BeautifulSoup(response.content, "html.parser")
         if has_js(soup):
             toplam_skor = -1
-            print(f"{page} sayfası harici JS içeriyor, değerlendirme yapılamadı.")
+            log_to_file(log_file, f"{page}: Harici JS içeriyor, değerlendirme yapılamadı.\n")
             return
 
         # Başlık Kontrolü
-        if has_header(soup):
+        header_check = has_header(soup)
+        if header_check:
             baslik_uyumlu_sayfa += 1
 
         # Tablo Kontrolü
-        if has_table(soup) and not tablo_puani_eklendi:
+        table_check = has_table(soup)
+        if table_check and not tablo_puani_eklendi:
             tablo_puani_eklendi = True
 
         # Paragraf Kontrolü
-        if has_long_paragraph(soup, tresholds):
+        paragraph_check = has_long_paragraph(soup, tresholds)
+        if paragraph_check:
             paragraf_uyumlu_sayfa += 1
 
         # Resim Kontrolü
-        if has_image(soup):
+        image_check = has_image(soup)
+        if image_check:
             resim_uyumlu_sayfa += 1
 
         # Yorum Kontrolü
-        if has_comment(soup):
+        comment_check = has_comment(soup)
+        if comment_check:
             yorumlu_sayfa_sayisi += 1
+
+        # Sayfa bazında analiz loglama
+        log_to_file(
+            log_file,
+            f"Sayfa: {page}\n"
+            f"Başlık Bulundu: {'Evet' if header_check else 'Hayır'}\n"
+            f"Tablo Bulundu: {'Evet' if table_check else 'Hayır'}\n"
+            f"Uzun Paragraf Bulundu: {'Evet' if paragraph_check else 'Hayır'}\n"
+            f"Resim Bulundu: {'Evet' if image_check else 'Hayır'}\n"
+            f"Yorum Satırı Bulundu: {'Evet' if comment_check else 'Hayır'}\n"
+        )
 
     # Skor Hesaplamaları
     toplam_indeks_puani = round(min(weights["index"] * toplam_sayfa_sayisi, weights["max_index_score"]))
@@ -216,42 +242,44 @@ def evaluate_pages_with_config(base_url, config):
         + toplam_resim_puani
         + toplam_yorum_puani
         + tablo_puani
-        )
+    )
 
-
-    # Sonuçları Yazdır
-    print("******************************************")
-    print(f"İndeks Puanı: {toplam_indeks_puani} (Her sayfa {weights['index']} puan kazandırır, maksimum {weights['max_index_score']} puan)")
-    print(f"Başlık Puanı: {toplam_baslik_puani:.2f} ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama: {weights['header']} * ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi}))")
-    print(f"Paragraf Puanı: {toplam_paragraf_puani:.2f} ({paragraf_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama {weights['paragraph']} *{paragraf_uyumlu_sayfa} / {toplam_sayfa_sayisi}))")
-    print(f"Resim Puanı: {toplam_resim_puani:.2f} ({resim_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama {weights['image']} * {resim_uyumlu_sayfa} / {toplam_sayfa_sayisi})")
-    print(f"Yorum Puanı: {toplam_yorum_puani} ({'Tüm sayfalarda yorum bulundu' if yorumlu_sayfa_sayisi == toplam_sayfa_sayisi else 'Her sayfada yorum satırı bulunamadı'}, varsa {weights['comments']} puan)")
-    print(f"Tablo Puanı: {tablo_puani} (Tablo bulundu mu: {'Evet' if tablo_puani_eklendi else 'Hayır'}, tablo puanı: {weights['table']})")
-    print(f"Toplam Skor (100 üzerinden): {min(toplam_skor, 100):.2f}")
-
+    # Nihai sonuçları log dosyasına yazma
+    log_to_file(
+        log_file,
+        "\n******************************************\n"
+        f"URL: {base_url}\n"
+        f"İndeks Puanı: {toplam_indeks_puani} (Her sayfa {weights['index']} puan kazandırır, maksimum {weights['max_index_score']} puan)\n"
+        f"Başlık Puanı: {toplam_baslik_puani:.2f} ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama: {weights['header']} * ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi}))\n"
+        f"Paragraf Puanı: {toplam_paragraf_puani:.2f} ({paragraf_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama {weights['paragraph']} * ({paragraf_uyumlu_sayfa} / {toplam_sayfa_sayisi}))\n"
+        f"Resim Puanı: {toplam_resim_puani:.2f} ({resim_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama {weights['image']} * ({resim_uyumlu_sayfa} / {toplam_sayfa_sayisi}))\n"
+        f"Yorum Puanı: {toplam_yorum_puani} ({'Tüm sayfalarda yorum bulundu' if yorumlu_sayfa_sayisi == toplam_sayfa_sayisi else 'Her sayfada yorum satırı bulunamadı'}, varsa {weights['comments']} puan)\n"
+        f"Tablo Puanı: {tablo_puani} (Tablo bulundu mu: {'Evet' if tablo_puani_eklendi else 'Hayır'}, tablo puanı: {weights['table']})\n"
+        f"Toplam Skor (100 üzerinden): {min(toplam_skor, 100):.2f}\n"
+        "******************************************\n"
+    )
+    print(f"{base_url} için değerlendirme tamamlandı. Detaylı analizler log dosyasına kaydedildi.")
     sonuclar.append(Not(base_url, toplam_indeks_puani, toplam_baslik_puani, toplam_paragraf_puani, toplam_resim_puani, toplam_yorum_puani, tablo_puani, min(toplam_skor, 100)))
     return sonuclar
 
 def write_to_csv(sonuclar):
     with open("sonuclar.csv", "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
+        # Sadece URL ve Total Skor için alan adları
+        fieldnames = ["url", "total_score"]
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         
-        # Başlıkları doğru şekilde ayırarak yazıyoruz
-        writer.writerow(["URL", "Indeks Puani", "Baslik Puani", "Paragraf Puani", "Resim Puani", "Yorum Puani", "Tablo Puani", "Toplam Skor"])
+        # Başlıkları yaz
+        writer.writeheader()
         
-        # Her satırda her bir parametreyi ayrı sütunlara yerleştiriyoruz
+        # Her bir 'Not' nesnesini yaz
         for sonuc in sonuclar:
-            writer.writerow([
-                sonuc.url, 
-                sonuc.index_score, 
-                sonuc.header_score, 
-                sonuc.paragraph_score, 
-                sonuc.image_score, 
-                sonuc.comment_score, 
-                sonuc.table_score, 
-                sonuc.total_score
-            ])
+            writer.writerow({
+                "url": sonuc.url, 
+                "total_score": sonuc.total_score
+            })
+
 def main(input_file):
+    print("Değerlendirme başladı...")
     config = load_config("config.json")
     urls = load_urls(input_file)
     output_file = "sonuclar.csv"
@@ -259,7 +287,7 @@ def main(input_file):
     sonuclar = []
     for url in urls:
         url = url.strip()  # Boşlukları temizle
-        sonuc = evaluate_pages_with_config(url, config)
+        sonuc = evaluate_pages(url, config)
         if sonuc:  # Eğer boş değilse listeye ekle
             sonuclar.extend(sonuc)  # Sonuçlar bir liste olduğu için genişletiyoruz
 

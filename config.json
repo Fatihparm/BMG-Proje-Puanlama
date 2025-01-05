@@ -4,11 +4,11 @@
       "max_index_score": 20,
       "header": 20,
       "paragraph": 20,
-      "image": 20,
+      "image": 20, 
       "comments": 10,
       "table": 10
     },
-    "thresholds": {
+    "tresholds": {
       "header_min_pages": 1,
       "paragraph_length": 300,
       "image_count": 1
