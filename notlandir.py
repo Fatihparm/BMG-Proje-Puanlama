@@ -132,13 +132,15 @@ def has_table(content):
 
 def has_long_paragraph(content, tresholds):
     """
-    Sayfa içinde 300 karakterden uzun bir paragraf içeren bir paragraf olup olmadığını kontrol eder.
+    Sayfa içinde toplamda belirtilen uzunluktan fazla karakter içeren paragrafları (hem <p> hem de <pre>) kontrol eder.
     """
-    paragraphs = content.find_all("p")
+    paragraphs = content.find_all(["p", "pre"])  # Hem <p> hem de <pre> etiketlerini bul
+    total_characters = 0
+
     for paragraph in paragraphs:
-        if len(paragraph.get_text(strip=True)) >= tresholds["paragraph_length"]:
-            return True
-    return False
+        total_characters += len(paragraph.get_text(strip=True))
+    
+    return total_characters >= tresholds["paragraph_length"]
 
 def has_comment(content):
     """
