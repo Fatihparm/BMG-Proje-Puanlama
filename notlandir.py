@@ -11,8 +11,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 global tresholds, weights , config, urls
 class Not:
-    def __init__(self, url, index_score, header_score, paragraph_score, image_score, comment_score, table_score, total_score):
+    def __init__(self, student_name, url, index_score, header_score, paragraph_score, image_score, comment_score, table_score, total_score):
         self.url = url
+        self.student_name = student_name
         self.index_score = index_score
         self.header_score = header_score
         self.paragraph_score = paragraph_score
@@ -25,9 +26,33 @@ def load_config(file_path="config.json"):
     with open(file_path, "r") as file:
         return json.load(file)
 
-def load_urls(file_path="urls.txt"):
-    with open(file_path, "r") as file:
-        return file.readlines()
+def load_urls(file_path="sonuclar_tamami_dahil.txt"):
+    """
+    urls.txt dosyasını okuyup öğrenci adlarını ve URL'leri bir dictionary olarak döndürür.
+    """
+    with open(file_path, "r", encoding="ISO-8859-9") as file:
+        data = file.readlines()
+
+    url_dict = {}
+    student_name = None  # Başlangıçta öğrenci adı yok
+    
+    for line in data:
+        line = line.strip()  # Satırdaki boşlukları temizle
+        if not line:
+            continue
+        
+        if "Öğrenci:" in line:
+            # Öğrenci adı satırından adı al
+            student_name = line.replace("Öğrenci:", "").strip()
+            student_name = student_name.split("_")[0].strip()
+        elif student_name:  # URL satırını al
+            # URL'yi öğrenci adı ile eşleştir
+            url_dict[student_name] = line.strip()
+            student_name = None  # URL'den sonra öğrenci adı sıfırlanır
+    
+    return url_dict
+
+
 config = load_config("config.json")
 tresholds = config["tresholds"]
 weights = config["weights"]
@@ -136,10 +161,6 @@ def get_pages(base_url, tresholds):
             pages.add(full_link)
     return sorted(pages)  # Sıralı liste olarak döndürülür.
 
-
-
-
-
 def has_js(content):
     """
     Sayfa içinde harici (external) JavaScript kullanılıp kullanılmadığını kontrol eder.
@@ -205,7 +226,7 @@ def log_to_file(log_file, message):
     with open(log_file, "a", encoding="utf-8") as file:
         file.write(message + "\n")
 
-def evaluate_pages(base_url, config, log_file="log.txt"):
+def evaluate_pages(student_name, base_url, config, log_file="log.txt"):
     """
     Sayfa analizlerini loglar ve nihai sonuçları bir dosyaya kaydeder.
     """
@@ -294,6 +315,7 @@ def evaluate_pages(base_url, config, log_file="log.txt"):
     log_to_file(
         log_file,
         "\n******************************************\n"
+        f"Öğrenci: {student_name}\n"
         f"URL: {base_url}\n"
         f"İndeks Puanı: {toplam_indeks_puani} (Her sayfa {weights['index']} puan kazandırır, maksimum {weights['max_index_score']} puan)\n"
         f"Başlık Puanı: {toplam_baslik_puani:.2f} ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi} sayfa, Puan hesaplama: {weights['header']} * ({baslik_uyumlu_sayfa} / {toplam_sayfa_sayisi}))\n"
@@ -305,21 +327,20 @@ def evaluate_pages(base_url, config, log_file="log.txt"):
         "******************************************\n"
     )
     print(f"{base_url} için değerlendirme tamamlandı. Detaylı analizler log dosyasına kaydedildi.")
-    sonuclar.append(Not(base_url, toplam_indeks_puani, toplam_baslik_puani, toplam_paragraf_puani, toplam_resim_puani, toplam_yorum_puani, tablo_puani, min(toplam_skor, 100)))
+    sonuclar.append(Not(student_name, base_url, toplam_indeks_puani, toplam_baslik_puani, toplam_paragraf_puani, toplam_resim_puani, toplam_yorum_puani, tablo_puani, min(toplam_skor, 100)))
     return sonuclar
 
 def write_to_csv(sonuclar):
     with open("sonuclar.csv", "w", newline="", encoding="utf-8") as file:
         # Sadece URL ve Total Skor için alan adları
-        fieldnames = ["url", "total_score"]
+        fieldnames = ["student_name", "url", "total_score"]
         writer = csv.DictWriter(file, fieldnames=fieldnames)
-        
         # Başlıkları yaz
         writer.writeheader()
-        
         # Her bir 'Not' nesnesini yaz
         for sonuc in sonuclar:
             writer.writerow({
+                "student_name": sonuc.student_name,
                 "url": sonuc.url, 
                 "total_score": sonuc.total_score
             })
@@ -331,9 +352,9 @@ def main(input_file):
     output_file = "sonuclar.csv"
 
     sonuclar = []
-    for url in urls:
+    for student_name, url in urls.items():
         url = url.strip()  # Boşlukları temizle
-        sonuc = evaluate_pages(url, config)
+        sonuc = evaluate_pages(student_name, url, config)
         if sonuc:  # Eğer boş değilse listeye ekle
             sonuclar.extend(sonuc)  # Sonuçlar bir liste olduğu için genişletiyoruz
 
@@ -342,7 +363,7 @@ def main(input_file):
 
 if __name__ == "__main__":
     try:
-        input_file = "urls.txt"
+        input_file = "sonuclar_tamami_dahil.txt"
         main(input_file)
     except Exception as e:
-        print(f"Bir hata oluştu: {e}")
+        print(f"Hata oluştu: {e}")
