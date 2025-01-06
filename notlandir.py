@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup, Comment
 import time
 import urllib3
 import json
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urljoin, urlunparse
 import argparse
 import csv
 
@@ -49,13 +49,36 @@ def polite_get(url, delay=2):
         print(f"Error accessing {url}: {e}")
         return None
 
+def fix_url(url):
+    """
+    Eğer bir URL'de 'http://' veya 'https://' eksikse, uygun protokolü ekler.
+    Ayrıca domain (host) kısmını küçük harfe dönüştürür.
+    """
+    parsed = urlparse(url)
+    
+    # Eğer URL'nin bir protokolü yoksa, 'https://' ekle
+    if not parsed.scheme:
+        url = f"https://{url}"
+        parsed = urlparse(url)  # Protokol eklendiği için yeniden parse et
+    
+    # Domain kısmını (netloc) küçük harfe çevir
+    normalized_netloc = parsed.netloc.lower()
+    
+    # Güncellenmiş URL'yi yeniden oluştur
+    fixed_url = urlunparse((
+        parsed.scheme, normalized_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+    ))
+    
+    return fixed_url
+
 def get_pages(base_url, tresholds):
     """
     Verilen bir base URL'deki tüm .html sayfalarını ve belirtilen kurallara uygun sayfaları döndürür.
     """
     pages = set()  # Tekrarlayan bağlantıları önlemek için set kullanılır.
-
-    # Base URL'nin temizlenmesi (gereksiz boşluk veya satır sonu karakterleri kaldırılır).
+    base_url = fix_url(base_url)  # URL'yi düzelt (örneğin, eksik https:// ekle).
+    
+    # Base URL'nin temizlenmesi.
     base_url = base_url.strip()
     if base_url.endswith("/"):
         base_url = base_url.rstrip("/")
@@ -68,9 +91,9 @@ def get_pages(base_url, tresholds):
         return list(pages)
 
     soup = BeautifulSoup(response.content, "html.parser")
-
-    # Tüm <a> etiketleri
-    links = soup.find_all("a")
+    
+    # Base sayfa ekleniyor.
+    pages.add(base_url)
 
     # Eğer onclick_allowed 1 ise, <button onclick="..."> etiketlerini de kontrol et.
     if tresholds.get("onclick_allowed", 0) == 1:
@@ -87,35 +110,30 @@ def get_pages(base_url, tresholds):
                     parts = onclick_value.split("window.open(")[-1].split(",")[0]
                     href = parts.strip(" '\"")
 
-                # Geçerli bir href varsa, tam URL'yi oluştur ve listeye ekle
+                # Geçerli bir href varsa, tam URL'yi oluştur ve listeye ekle.
                 if href:
                     full_link = urljoin(base_url, href)
                     if full_link.endswith(".html") or full_link.endswith("/"):
                         pages.add(full_link)
 
-    # Base sayfa ekleniyor.
-    pages.add(base_url)
-
+    links = soup.find_all("a", href=True)
+    
     # Tüm <a> etiketlerindeki href'leri kontrol ediyoruz.
     for link in links:
-        href = link.get("href")
+        href = link.get("href").strip()
         if not href:
             continue  # Boş bağlantılar atlanır.
 
         # Href bir tam URL değilse, base URL ile birleştirilir.
-        full_link = urljoin(base_url, href.strip())
+        full_link = urljoin(base_url, href)
 
-        # Sadece verilen kök URL'ye bağlı sayfalar kabul ediliyor.
-        if not full_link.startswith(base_url.rsplit("/", 1)[0]):
+        # Base URL'nin kök kısmını oluştur.
+        base_parsed = urlparse(base_url)
+        base_root = f"{base_parsed.scheme}://{base_parsed.netloc}"
+        if not full_link.startswith(base_root):
             continue
-
-        # Kabul edilen sayfa formatları.
-        if (
-            full_link.endswith(".html") or  # .html sayfalar
-            full_link.endswith("/")         # Dizin bağlantıları
-        ):
+        if (full_link.endswith(".html") or full_link.endswith("/")):
             pages.add(full_link)
-
     return sorted(pages)  # Sıralı liste olarak döndürülür.
 
 
@@ -150,7 +168,7 @@ def has_table(content):
         rows = table.find_all("tr")
         if len(rows) >= 2:
             for row in rows:
-                cells = row.find_all("td")
+                cells = row.find_all(["td", "th"])
                 if len(cells) >= 2:
                     return True
     return False
