@@ -228,6 +228,7 @@ def evaluate_pages(base_url, config, log_file="log.txt"):
         response = polite_get(page)
         if response is None:
             log_to_file(log_file, f"{page}: Sayfaya erişilemedi.\n")
+            toplam_sayfa_sayisi -= 1
             continue
 
         soup = BeautifulSoup(response.content, "html.parser")
