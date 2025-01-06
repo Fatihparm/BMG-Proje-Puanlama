@@ -11,7 +11,8 @@
     "tresholds": {
       "header_min_pages": 1,
       "paragraph_length": 300,
-      "image_count": 1
+      "image_count": 1,
+      "onclick_allowed": 1
     }
   }
   
