@@ -49,7 +49,7 @@ def polite_get(url, delay=2):
         print(f"Error accessing {url}: {e}")
         return None
 
-def get_pages(base_url):
+def get_pages(base_url, tresholds):
     """
     Verilen bir base URL'deki tüm .html sayfalarını ve belirtilen kurallara uygun sayfaları döndürür.
     """
@@ -68,7 +68,30 @@ def get_pages(base_url):
         return list(pages)
 
     soup = BeautifulSoup(response.content, "html.parser")
+
+    # Tüm <a> etiketleri
     links = soup.find_all("a")
+
+    # Eğer onclick_allowed 1 ise, <button onclick="..."> etiketlerini de kontrol et.
+    if tresholds.get("onclick_allowed", 0) == 1:
+        buttons = soup.find_all("button", onclick=True)
+        for button in buttons:
+            onclick_value = button.get("onclick")
+            if onclick_value:
+                href = None
+                # `location.href` kontrolü
+                if "location.href" in onclick_value:
+                    href = onclick_value.split("location.href=")[-1].strip(" '\"")
+                # `window.open` kontrolü
+                elif "window.open" in onclick_value:
+                    parts = onclick_value.split("window.open(")[-1].split(",")[0]
+                    href = parts.strip(" '\"")
+
+                # Geçerli bir href varsa, tam URL'yi oluştur ve listeye ekle
+                if href:
+                    full_link = urljoin(base_url, href)
+                    if full_link.endswith(".html") or full_link.endswith("/"):
+                        pages.add(full_link)
 
     # Base sayfa ekleniyor.
     pages.add(base_url)
@@ -94,6 +117,8 @@ def get_pages(base_url):
             pages.add(full_link)
 
     return sorted(pages)  # Sıralı liste olarak döndürülür.
+
+
 
 
 
@@ -166,7 +191,7 @@ def evaluate_pages(base_url, config, log_file="log.txt"):
     """
     Sayfa analizlerini loglar ve nihai sonuçları bir dosyaya kaydeder.
     """
-    pages = get_pages(base_url)
+    pages = get_pages(base_url, tresholds)
     log_to_file(log_file, f"{base_url} için {len(pages)} sayfa bulundu.\n")
     if not pages:
         log_to_file(log_file, f"{base_url} için sayfa bulunamadı.\n")
