@@ -30,7 +30,7 @@ def load_urls(file_path):
     """
     urls.txt dosyasını okuyup öğrenci adlarını ve URL'leri bir dictionary olarak döndürür.
     """
-    with open(file_path, "r", encoding="ISO-8859-9") as file:
+    with open(file_path, "r", encoding="utf-8") as file:
         data = file.readlines()
 
     url_dict = {}
@@ -335,6 +335,7 @@ def evaluate_pages(student_name, base_url, config, log_file):
             f"URL: {base_url}\n"
             f"Öğrenci doğru formatta bir sayfa göndermemiş: {js_sayfa_url}\n"
             f"Skor: 0"
+            "\n******************************************\n"
         )
         print(f"{base_url} için değerlendirme tamamlandı. Detaylı analizler log dosyasına kaydedildi.")
         sonuclar.append(Not(student_name, base_url, 0, 0, 0, 0, 0, 0, 0))   
@@ -347,6 +348,7 @@ def evaluate_pages(student_name, base_url, config, log_file):
             f"URL: {base_url}\n"
             f"Öğrencinin sayfasında js bulundu: {js_sayfa_url}\n"
             f"Skor: 0"
+            "\n******************************************\n"
         )
         print(f"{base_url} için değerlendirme tamamlandı. Detaylı analizler log dosyasına kaydedildi.")
         sonuclar.append(Not(student_name, base_url, 0, 0, 0, 0, 0, 0, 0))
