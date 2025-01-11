@@ -12,7 +12,9 @@
       "header_min_pages": 1,
       "paragraph_length": 300,
       "image_count": 1,
-      "onclick_allowed": 1
+      "onclick_allowed": 1, 
+      "external_js_allowed": 0,
+      "check_images_all_pages": 0
     }
   }
   
