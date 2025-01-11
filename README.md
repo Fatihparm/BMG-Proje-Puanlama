@@ -23,12 +23,12 @@ git clone https://github.com/Fatihparm/BMG-Proje-Puanlama-.git
 pip install -r requirements.txt
 ```
 
-- Scriptin çalışması için aynı dizinde urls.txt isminde bir dosya olması gerekir. Halihazırda gelen urls.txt dosyasına ekleme yapabilirsiniz. Ancak dosya adının **"urls.txt"** olması gerekir.
+- Scriptin çalışması için aynı dizinde içinde urllerin ve öğrenci adlarının bulunduğu bir txt dosyası olması gerekir. Örneğin: `urls.txt`
 
 Bu işlemleri tamamladıktan sonra çalıştırmaya hazırız. Kodu çalıştırmak için derleyiciden notlandir.py'yi run edebilir veya;
 
 ```bash
-python notlandir.py urls.txt
+python notlandir.py urls.txt log.txt
 ```
 komutunu çalıştırabilirsiniz.
 
